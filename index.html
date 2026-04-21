@@ -484,7 +484,7 @@ html, body {
     <div class="empty-state" id="emptyState">
       <div class="empty-icon">📚</div>
       <h2>Your library is empty</h2>
-      <p>Upload the same comic in two languages to read with the bilingual reveal lens.</p>
+      <p>Upload the same comic in your learning language and your native language to read with the bilingual reveal lens.</p>
       <button class="btn btn-primary" id="emptyAddBtn">+ Add Comic</button>
     </div>
   </div>
@@ -503,16 +503,16 @@ html, body {
       </div>
       <div class="upload-zone">
         <div class="upload-card" id="uploadPrimary" onclick="document.getElementById('filePrimary').click()">
-          <div class="tag tag-primary">Primary</div>
+          <div class="tag tag-primary">Learning</div>
           <div style="font-size:28px">📖</div>
-          <div class="label" id="labelPrimary">Upload primary language</div>
+          <div class="label" id="labelPrimary">Upload learning language</div>
           <div class="sublabel">CBZ or CBR file</div>
           <input type="file" id="filePrimary" accept=".cbz,.cbr,.zip,.rar">
         </div>
         <div class="upload-card" id="uploadAlt" onclick="document.getElementById('fileAlt').click()">
-          <div class="tag tag-alt">Alternate</div>
+          <div class="tag tag-alt">Native</div>
           <div style="font-size:28px">📗</div>
-          <div class="label" id="labelAlt">Upload alternate language</div>
+          <div class="label" id="labelAlt">Upload native language</div>
           <div class="sublabel">CBZ or CBR file</div>
           <input type="file" id="fileAlt" accept=".cbz,.cbr,.zip,.rar">
         </div>
@@ -531,7 +531,7 @@ html, body {
       <div class="lens-ring" id="lensRing"></div>
     </div>
 
-    <div class="lang-pill primary" id="langPill">Primary</div>
+    <div class="lang-pill primary" id="langPill">Learning</div>
 
     <div class="tap-zone-left" id="tapLeft"></div>
     <div class="tap-zone-right" id="tapRight"></div>
@@ -804,8 +804,8 @@ html, body {
     $('comicNameInput').value = '';
     $('uploadPrimary').classList.remove('loaded');
     $('uploadAlt').classList.remove('loaded');
-    $('labelPrimary').textContent = 'Upload primary language';
-    $('labelAlt').textContent = 'Upload alternate language';
+    $('labelPrimary').textContent = 'Upload learning language';
+    $('labelAlt').textContent = 'Upload native language';
     $('filePrimary').value = '';
     $('fileAlt').value = '';
     checkReady();
@@ -889,7 +889,7 @@ html, body {
     showLoading('Extracting pages…');
     try {
       primaryPages = await extractPages(comic.primaryBlob, comic.primaryFileName);
-      loadingText.textContent = 'Extracting alternate language…';
+      loadingText.textContent = 'Extracting native language…';
       altPages = await extractPages(comic.altBlob, comic.altFileName);
 
       if (primaryPages.length === 0 || altPages.length === 0) {
@@ -1179,7 +1179,7 @@ html, body {
     $('prevBtn').disabled       = currentPage === 0;
     $('nextBtn').disabled       = currentPage >= primaryPages.length - 1;
 
-    langPill.textContent = swapped ? 'Alternate' : 'Primary';
+    langPill.textContent = swapped ? 'Native' : 'Learning';
     langPill.className   = 'lang-pill ' + (swapped ? 'alt' : 'primary');
 
     // Offset indicator
