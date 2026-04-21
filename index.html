@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>LinguaLens Comic Reader</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiTGluZ3VhTGVucyIsInNob3J0X25hbWUiOiJMaW5ndWFMZW5zIiwic3RhcnRfdXJsIjoiLiIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwYTBhMGYiLCJ0aGVtZV9jb2xvciI6IiMwYTBhMGYifQ==">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Anybody:wght@400;700;900&family=DM+Sans:wght@400;500;600&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #0a0a0f;
+  --bg-surface: #14141f;
+  --bg-card: #1c1c2e;
+  --bg-card-hover: #24243a;
+  --accent: #f0c040;
+  --accent-dim: #c49a20;
+  --accent-glow: rgba(240, 192, 64, 0.25);
+  --text-primary: #e8e4dc;
+  --text-secondary: #8a8698;
+  --text-muted: #55526a;
+  --danger: #e05050;
+  --success: #40c080;
+  --radius: 12px;
+  --lens-border: rgba(240, 192, 64, 0.7);
+  --lens-shadow: rgba(240, 192, 64, 0.3);
+}
+
+html, body {
+  height: 100%; width: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+#app { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; }
+
+/* ── Shared Header ── */
+.header {
+  height: 56px; min-height: 56px;
+  padding: 0 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  z-index: 100;
+  transition: transform 0.3s ease;
+  flex-shrink: 0;
+}
+.header.hidden { transform: translateY(-100%); }
+.logo {
+  font-family: 'Anybody', sans-serif;
+  font-weight: 900; font-size: 18px;
+  color: var(--accent); letter-spacing: 1px;
+}
+.logo span { color: var(--text-primary); font-weight: 400; }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  border: none; border-radius: 8px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s ease;
+}
+.btn-primary { background: var(--accent); color: #0a0a0f; }
+.btn-primary:hover { background: #f5d060; }
+.btn-ghost {
+  background: transparent; color: var(--text-secondary);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+
+/* ── Library Screen ── */
+#libraryScreen {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+
+.comics-grid {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+  align-content: start;
+  -webkit-overflow-scrolling: touch;
+}
+
+.comic-card {
+  border-radius: 10px; overflow: hidden;
+  background: var(--bg-card);
+  cursor: pointer; position: relative;
+  aspect-ratio: 2/3;
+  transition: transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.comic-card:active { transform: scale(0.95); }
+
+.comic-card-cover {
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
+}
+.comic-card-placeholder {
+  width: 100%; height: 100%;
+  background: linear-gradient(135deg, #1a1a30, #2a2a4a);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 44px;
+}
+.comic-card-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 24px 8px 8px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.88));
+}
+.comic-card-name {
+  font-size: 12px; font-weight: 600; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 1px;
+}
+.comic-card-progress { font-size: 10px; color: rgba(255,255,255,0.5); }
+.comic-card-delete {
+  position: absolute; top: 6px; right: 6px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+  border: none; color: rgba(255,255,255,0.75);
+  font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.comic-card-delete:hover { background: var(--danger); color: #fff; }
+
+/* Empty state */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 24px; text-align: center;
+}
+.empty-icon { font-size: 72px; margin-bottom: 20px; opacity: 0.5; }
+.empty-state h2 {
+  font-family: 'Anybody', sans-serif; font-weight: 900; font-size: 24px;
+  margin-bottom: 10px;
+}
+.empty-state p {
+  color: var(--text-secondary); font-size: 15px;
+  max-width: 320px; line-height: 1.6; margin-bottom: 28px;
+}
+
+/* ── Add Comic Screen ── */
+#addComicScreen {
+  position: fixed; inset: 0;
+  background: var(--bg-deep);
+  display: flex; flex-direction: column;
+  z-index: 200;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+#addComicScreen.visible { transform: translateX(0); }
+
+.add-form {
+  flex: 1; overflow-y: auto;
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 20px;
+  max-width: 480px; margin: 0 auto; width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.form-field { display: flex; flex-direction: column; gap: 8px; }
+.form-label {
+  font-size: 12px; font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.8px;
+}
+.form-input {
+  background: var(--bg-card);
+  border: 1.5px solid rgba(255,255,255,0.08);
+  border-radius: 10px; padding: 12px 14px;
+  color: var(--text-primary);
+  font-family: 'DM Sans', sans-serif; font-size: 16px;
+  outline: none; transition: border-color 0.2s;
+  -webkit-appearance: none;
+}
+.form-input:focus { border-color: var(--accent); }
+.form-input::placeholder { color: var(--text-muted); }
+
+/* ── Upload Cards (used in Add Comic) ── */
+.upload-zone {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.upload-card {
+  border: 2px dashed rgba(255,255,255,0.12);
+  border-radius: var(--radius); padding: 20px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; cursor: pointer;
+  transition: all 0.2s ease; position: relative;
+}
+.upload-card:hover { border-color: var(--accent); background: rgba(240,192,64,0.04); }
+.upload-card.loaded { border-color: var(--success); border-style: solid; background: rgba(64,192,128,0.06); }
+.upload-card .label { font-weight: 600; font-size: 14px; }
+.upload-card .sublabel { color: var(--text-muted); font-size: 12px; }
+.upload-card .tag {
+  position: absolute; top: 10px; right: 10px;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+}
+.tag-primary { background: var(--accent); color: #0a0a0f; }
+.tag-alt { background: #6060e0; color: #fff; }
+.upload-card input[type="file"] { display: none; }
+
+.start-btn {
+  margin-top: 4px; padding: 14px 32px;
+  font-size: 16px; font-weight: 700; border-radius: 14px;
+  background: var(--accent); color: #0a0a0f;
+  border: none; cursor: pointer;
+  font-family: 'Anybody', sans-serif; letter-spacing: 0.5px;
+  transition: all 0.2s ease;
+  opacity: 0.3; pointer-events: none;
+}
+.start-btn.ready { opacity: 1; pointer-events: auto; }
+.start-btn.ready:hover { transform: translateY(-2px); box-shadow: 0 8px 30px var(--accent-glow); }
+
+/* ── Reader ── */
+.reader {
+  position: fixed; inset: 0;
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; z-index: 300;
+}
+
+.page-canvas-container {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.page-img {
+  display: block;
+  max-width: 100vw; max-height: 100vh;
+  object-fit: contain; pointer-events: none;
+}
+
+/* Reveal Lens */
+.lens-layer {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.15s ease; overflow: hidden;
+}
+.lens-layer.active { opacity: 1; }
+.lens-layer img { position: absolute; pointer-events: none; }
+
+.lens-ring {
+  position: absolute; border-radius: 50%;
+  border: 3px solid var(--lens-border);
+  box-shadow: 0 0 20px var(--lens-shadow), inset 0 0 20px rgba(0,0,0,0.4);
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.15s ease; z-index: 50;
+}
+.lens-ring.active { opacity: 1; }
+
+/* Reader HUD */
+.reader-hud {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(transparent, rgba(0,0,0,0.85));
+  z-index: 80; transition: opacity 0.3s ease;
+}
+.reader-hud.hidden { opacity: 0; pointer-events: none; }
+
+.reader-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding-top: max(0px, env(safe-area-inset-top));
+  display: flex; align-items: center; justify-content: space-between;
+  padding-left: 12px; padding-right: 12px; padding-bottom: 0;
+  height: calc(56px + max(0px, env(safe-area-inset-top)));
+  background: linear-gradient(rgba(0,0,0,0.7), transparent);
+  z-index: 80; transition: opacity 0.3s ease;
+}
+.reader-header.hidden { opacity: 0; pointer-events: none; }
+.reader-header .logo { font-size: 15px; }
+
+.page-indicator {
+  font-family: 'Anybody', sans-serif; font-weight: 700; font-size: 14px;
+  color: rgba(255,255,255,0.7);
+}
+.page-indicator span { color: var(--accent); }
+
+.nav-arrows { display: flex; gap: 6px; }
+.nav-arrows button {
+  width: 44px; height: 44px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(8px);
+  color: #fff; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.nav-arrows button:hover { background: rgba(255,255,255,0.15); }
+.nav-arrows button:disabled { opacity: 0.3; pointer-events: none; }
+
+.hud-center { display: flex; gap: 8px; align-items: center; }
+.swap-btn {
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(8px);
+  color: #fff; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.swap-btn:hover { background: var(--accent); color: #0a0a0f; }
+
+.offset-control {
+  display: flex; align-items: center; gap: 4px;
+}
+.offset-btn {
+  width: 28px; height: 28px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(8px);
+  color: #fff; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s ease; padding: 0;
+}
+.offset-btn:hover { background: rgba(255,255,255,0.18); }
+.offset-label {
+  min-width: 28px; text-align: center;
+  font-size: 12px; font-weight: 700;
+  color: rgba(255,255,255,0.45);
+  font-family: 'DM Sans', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.btn-icon {
+  width: 38px; height: 38px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 10px;
+  background: rgba(255,255,255,0.1); backdrop-filter: blur(8px);
+  color: var(--text-secondary); cursor: pointer; font-size: 16px;
+  transition: all 0.2s ease;
+}
+.btn-icon:hover { background: rgba(255,255,255,0.18); color: var(--text-primary); }
+
+/* Tap zones */
+.tap-zone-left, .tap-zone-right {
+  position: absolute; top: 0; bottom: 0;
+  width: 25%; z-index: 10; cursor: pointer;
+}
+.tap-zone-left { left: 0; }
+.tap-zone-right { right: 0; }
+
+/* Language pill */
+.lang-pill {
+  position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 64px)); left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 14px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px;
+  z-index: 80; backdrop-filter: blur(8px);
+  transition: all 0.3s ease; pointer-events: none;
+}
+.lang-pill.primary { background: rgba(240,192,64,0.85); color: #0a0a0f; }
+.lang-pill.alt { background: rgba(96,96,224,0.85); color: #fff; }
+
+/* ── Loading Overlay ── */
+.loading-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,10,15,0.92);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 500;
+}
+.spinner {
+  width: 48px; height: 48px;
+  border: 4px solid rgba(255,255,255,0.1);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: var(--text-secondary); font-size: 14px; }
+
+/* ── Utility ── */
+.hidden { display: none !important; }
+
+/* ── Settings Panel ── */
+#settingsPanel {
+  position: fixed; inset: 0;
+  z-index: 600;
+  display: flex; flex-direction: column;
+  background: var(--bg-deep);
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#settingsPanel.open { transform: translateY(0); }
+
+.settings-header {
+  height: 56px; min-height: 56px;
+  padding: 0 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.settings-title {
+  font-family: 'Anybody', sans-serif;
+  font-weight: 900; font-size: 16px;
+  color: var(--text-primary); letter-spacing: 0.5px;
+}
+
+.settings-body {
+  flex: 1; overflow-y: auto;
+  padding: 24px 20px;
+  display: flex; flex-direction: column; gap: 32px;
+}
+
+.settings-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+}
+.settings-row-label {
+  font-size: 15px; font-weight: 500; color: var(--text-primary);
+}
+.settings-row-sub {
+  font-size: 12px; color: var(--text-secondary); margin-top: 2px;
+}
+
+.settings-slider-wrap {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.settings-slider-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.settings-slider {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.12); outline: none;
+  cursor: pointer;
+}
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-glow);
+  cursor: pointer;
+}
+.settings-slider-value {
+  min-width: 40px; text-align: right;
+  font-family: 'Anybody', sans-serif; font-weight: 700; font-size: 15px;
+  color: var(--accent);
+}
+.settings-lens-preview {
+  align-self: center; margin-top: 8px;
+  border-radius: 50%;
+  border: 3px solid var(--lens-border);
+  box-shadow: 0 0 16px var(--lens-shadow);
+  background: rgba(240, 192, 64, 0.08);
+  transition: width 0.1s ease, height 0.1s ease;
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── LIBRARY ── -->
+  <div id="libraryScreen">
+    <div class="header">
+      <div class="logo">LINGUA<span>LENS</span></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-icon" id="settingsBtn" title="Settings" style="font-size:18px;">⚙</button>
+        <button class="btn btn-primary" id="addComicBtn">+ Add</button>
+      </div>
+    </div>
+    <div class="comics-grid hidden" id="comicsGrid"></div>
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📚</div>
+      <h2>Your library is empty</h2>
+      <p>Upload the same comic in two languages to read with the bilingual reveal lens.</p>
+      <button class="btn btn-primary" id="emptyAddBtn">+ Add Comic</button>
+    </div>
+  </div>
+
+  <!-- ── ADD COMIC ── -->
+  <div id="addComicScreen">
+    <div class="header">
+      <button class="btn btn-ghost" id="cancelAddBtn">Cancel</button>
+      <div class="logo" style="font-size:15px;letter-spacing:0.5px">Add Comic</div>
+      <div style="width:72px"></div>
+    </div>
+    <div class="add-form">
+      <div class="form-field">
+        <label class="form-label">Comic Name</label>
+        <input type="text" id="comicNameInput" class="form-input" placeholder="e.g. Amazing Spider-Man #1">
+      </div>
+      <div class="upload-zone">
+        <div class="upload-card" id="uploadPrimary" onclick="document.getElementById('filePrimary').click()">
+          <div class="tag tag-primary">Primary</div>
+          <div style="font-size:28px">📖</div>
+          <div class="label" id="labelPrimary">Upload primary language</div>
+          <div class="sublabel">CBZ or CBR file</div>
+          <input type="file" id="filePrimary" accept=".cbz,.cbr,.zip,.rar">
+        </div>
+        <div class="upload-card" id="uploadAlt" onclick="document.getElementById('fileAlt').click()">
+          <div class="tag tag-alt">Alternate</div>
+          <div style="font-size:28px">📗</div>
+          <div class="label" id="labelAlt">Upload alternate language</div>
+          <div class="sublabel">CBZ or CBR file</div>
+          <input type="file" id="fileAlt" accept=".cbz,.cbr,.zip,.rar">
+        </div>
+        <button class="start-btn" id="saveComicBtn">Save to Library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── READER ── -->
+  <div class="reader hidden" id="readerScreen">
+    <div class="page-canvas-container" id="canvasContainer">
+      <img class="page-img" id="primaryImg">
+      <div class="lens-layer" id="lensLayer">
+        <img id="altImgLens">
+      </div>
+      <div class="lens-ring" id="lensRing"></div>
+    </div>
+
+    <div class="lang-pill primary" id="langPill">Primary</div>
+
+    <div class="tap-zone-left" id="tapLeft"></div>
+    <div class="tap-zone-right" id="tapRight"></div>
+
+    <div class="reader-header" id="readerHeader">
+      <button class="btn-icon" id="backBtn" title="Back to library">←</button>
+      <div class="logo" style="font-size:15px">LINGUA<span>LENS</span></div>
+      <button class="btn-icon" id="readerSettingsBtn" title="Settings" style="font-size:18px;">⚙</button>
+    </div>
+
+    <div class="reader-hud" id="readerHud">
+      <div class="nav-arrows">
+        <button id="prevBtn">◀</button>
+      </div>
+      <div class="hud-center">
+        <div class="offset-control">
+          <button class="offset-btn" id="offsetDec">−</button>
+          <span class="offset-label" id="offsetLabel">0</span>
+          <button class="offset-btn" id="offsetInc">+</button>
+        </div>
+        <button class="swap-btn" id="swapBtn">Swap</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="page-indicator"><span id="curPage">1</span> / <span id="totalPages">1</span></div>
+        <div class="nav-arrows"><button id="nextBtn">▶</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SETTINGS PANEL ── -->
+  <div id="settingsPanel">
+    <div class="settings-header">
+      <div class="settings-title">Settings</div>
+      <button class="btn-icon" id="settingsCloseBtn" style="font-size:20px;">✕</button>
+    </div>
+    <div class="settings-body">
+      <div>
+        <div class="settings-section-label">Lens</div>
+        <div class="settings-slider-wrap">
+          <div class="settings-row">
+            <div>
+              <div class="settings-row-label">Lens Size</div>
+              <div class="settings-row-sub">Diameter of the reveal circle</div>
+            </div>
+          </div>
+          <div class="settings-slider-row">
+            <input type="range" class="settings-slider" id="lensSizeSlider" min="40" max="300" value="90">
+            <span class="settings-slider-value" id="lensSizeValue">90</span>
+          </div>
+          <div style="display:flex;justify-content:center;padding:12px 0;">
+            <div class="settings-lens-preview" id="lensPreview"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOADING ── -->
+  <div class="loading-overlay hidden" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Loading…</div>
+  </div>
+
+</div>
+<script>
+(function () {
+
+  // ── IndexedDB Layer ──────────────────────────────────────────────────────
+
+  const DB_NAME = 'lingualens';
+  const DB_VERSION = 1;
+  const STORE = 'comics';
+  let _db = null;
+
+  function openDb() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          const store = db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+          store.createIndex('dateAdded', 'dateAdded');
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbGetAll() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbGet(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(id);
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbAdd(record) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(STORE, 'readwrite').objectStore(STORE).add(record);
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbDelete(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbUpdateLastPage(id, lastPage) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const getReq = store.get(id);
+      getReq.onsuccess = e => {
+        const rec = e.target.result;
+        if (!rec) return resolve();
+        rec.lastPage = lastPage;
+        store.put(rec).onsuccess = () => resolve();
+      };
+      getReq.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function dbUpdateAltOffset(id, offset) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const getReq = store.get(id);
+      getReq.onsuccess = e => {
+        const rec = e.target.result;
+        if (!rec) return resolve();
+        rec.altOffset = offset;
+        store.put(rec).onsuccess = () => resolve();
+      };
+      getReq.onerror = e => reject(e.target.error);
+    });
+  }
+
+  // ── State ────────────────────────────────────────────────────────────────
+
+  let primaryPages = [];
+  let altPages = [];
+  let currentPage = 0;
+  let altOffset = 0;   // alt page = currentPage + altOffset
+  let lensRadius = parseInt(localStorage.getItem('ll_lensRadius') || '90', 10);
+  let swapped = false;
+  let hudVisible = true;
+  let hudTimeout = null;
+  let touching = false;
+  let currentComicId = null;
+
+  // Add-comic form state
+  let primaryFile = null;
+  let altFile = null;
+
+  // Cover URLs created for library cards (tracked for cleanup)
+  let coverUrls = [];
+
+  // ── Element References ───────────────────────────────────────────────────
+
+  const $ = id => document.getElementById(id);
+
+  const libraryScreen  = $('libraryScreen');
+  const comicsGrid     = $('comicsGrid');
+  const emptyState     = $('emptyState');
+  const addComicScreen = $('addComicScreen');
+  const readerScreen   = $('readerScreen');
+  const loadingOverlay = $('loadingOverlay');
+  const loadingText    = $('loadingText');
+  const primaryImg     = $('primaryImg');
+  const altImgLens     = $('altImgLens');
+  const lensLayer      = $('lensLayer');
+  const lensRing       = $('lensRing');
+  const canvasContainer = $('canvasContainer');
+  const langPill       = $('langPill');
+  const lensSizeSlider  = $('lensSizeSlider');
+  const lensSizeValue   = $('lensSizeValue');
+  const lensPreview     = $('lensPreview');
+  const settingsPanel   = $('settingsPanel');
+  const readerHud      = $('readerHud');
+  const readerHeader   = $('readerHeader');
+
+  // ── Loading Overlay Helpers ──────────────────────────────────────────────
+
+  function showLoading(msg) {
+    loadingText.textContent = msg || 'Loading…';
+    loadingOverlay.classList.remove('hidden');
+  }
+  function hideLoading() {
+    loadingOverlay.classList.add('hidden');
+  }
+
+  // ── Library Rendering ────────────────────────────────────────────────────
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  async function renderLibrary() {
+    // Revoke any old cover object URLs
+    coverUrls.forEach(u => URL.revokeObjectURL(u));
+    coverUrls = [];
+
+    const comics = await dbGetAll();
+    comics.sort((a, b) => b.dateAdded - a.dateAdded);
+
+    if (comics.length === 0) {
+      comicsGrid.classList.add('hidden');
+      emptyState.classList.remove('hidden');
+      return;
+    }
+
+    emptyState.classList.add('hidden');
+    comicsGrid.classList.remove('hidden');
+
+    comicsGrid.innerHTML = comics.map(comic => {
+      let coverHtml;
+      if (comic.coverBlob) {
+        const url = URL.createObjectURL(comic.coverBlob);
+        coverUrls.push(url);
+        coverHtml = `<img class="comic-card-cover" src="${escapeHtml(url)}" alt="">`;
+      } else {
+        coverHtml = `<div class="comic-card-placeholder">📖</div>`;
+      }
+      const progress = comic.lastPage > 0
+        ? `Page ${comic.lastPage + 1}`
+        : 'Not started';
+      return `
+        <div class="comic-card" onclick="openComic(${comic.id})">
+          ${coverHtml}
+          <div class="comic-card-overlay">
+            <div class="comic-card-name">${escapeHtml(comic.name)}</div>
+            <div class="comic-card-progress">${progress}</div>
+          </div>
+          <button class="comic-card-delete" onclick="event.stopPropagation();deleteComic(${comic.id})" title="Remove">✕</button>
+        </div>`;
+    }).join('');
+  }
+
+  // Expose to inline onclick handlers
+  window.openComic = openComic;
+  window.deleteComic = deleteComic;
+
+  // ── Add Comic Screen ─────────────────────────────────────────────────────
+
+  function showAddComic() {
+    primaryFile = null; altFile = null;
+    $('comicNameInput').value = '';
+    $('uploadPrimary').classList.remove('loaded');
+    $('uploadAlt').classList.remove('loaded');
+    $('labelPrimary').textContent = 'Upload primary language';
+    $('labelAlt').textContent = 'Upload alternate language';
+    $('filePrimary').value = '';
+    $('fileAlt').value = '';
+    checkReady();
+    addComicScreen.classList.add('visible');
+    setTimeout(() => $('comicNameInput').focus(), 350);
+  }
+
+  function hideAddComic() {
+    addComicScreen.classList.remove('visible');
+  }
+
+  function checkReady() {
+    const btn = $('saveComicBtn');
+    if (primaryFile && altFile) btn.classList.add('ready');
+    else btn.classList.remove('ready');
+  }
+
+  $('addComicBtn').addEventListener('click', showAddComic);
+  $('emptyAddBtn').addEventListener('click', showAddComic);
+  $('cancelAddBtn').addEventListener('click', hideAddComic);
+
+  $('filePrimary').addEventListener('change', e => {
+    primaryFile = e.target.files[0];
+    if (primaryFile) {
+      $('labelPrimary').textContent = primaryFile.name;
+      $('uploadPrimary').classList.add('loaded');
+
+      // Pre-populate name field from filename if the user hasn't typed anything
+      const nameInput = $('comicNameInput');
+      if (!nameInput.value.trim()) {
+        nameInput.value = inferComicName(primaryFile.name);
+      }
+    }
+    checkReady();
+  });
+  $('fileAlt').addEventListener('change', e => {
+    altFile = e.target.files[0];
+    if (altFile) {
+      $('labelAlt').textContent = altFile.name;
+      $('uploadAlt').classList.add('loaded');
+    }
+    checkReady();
+  });
+
+  $('saveComicBtn').addEventListener('click', async () => {
+    const name = $('comicNameInput').value.trim();
+    if (!name) { $('comicNameInput').focus(); return; }
+    if (!primaryFile || !altFile) return;
+
+    hideAddComic();
+    showLoading('Extracting cover…');
+    try {
+      const coverBlob = await extractCoverBlob(primaryFile);
+      showLoading('Saving to library…');
+      await dbAdd({
+        name,
+        primaryBlob: primaryFile,
+        altBlob: altFile,
+        primaryFileName: primaryFile.name,
+        altFileName: altFile.name,
+        coverBlob,
+        lastPage: 0,
+        dateAdded: Date.now(),
+      });
+      hideLoading();
+      await renderLibrary();
+    } catch (err) {
+      hideLoading();
+      alert('Error saving comic: ' + err.message);
+      showAddComic();
+    }
+  });
+
+  // ── Open / Delete Comic ──────────────────────────────────────────────────
+
+  async function openComic(id) {
+    const comic = await dbGet(id);
+    if (!comic) { alert('Comic not found.'); return; }
+
+    currentComicId = id;
+    showLoading('Extracting pages…');
+    try {
+      primaryPages = await extractPages(comic.primaryBlob, comic.primaryFileName);
+      loadingText.textContent = 'Extracting alternate language…';
+      altPages = await extractPages(comic.altBlob, comic.altFileName);
+
+      if (primaryPages.length === 0 || altPages.length === 0) {
+        throw new Error('No image pages found. The archive may be corrupted or use an unsupported format.');
+      }
+
+      // Load saved offset or auto-detect if not yet set
+      if (typeof comic.altOffset === 'number') {
+        altOffset = comic.altOffset;
+      } else {
+        loadingText.textContent = 'Detecting page alignment…';
+        altOffset = await detectAltOffset(primaryPages, altPages);
+        if (altOffset !== 0) dbUpdateAltOffset(id, altOffset);
+      }
+
+      hideLoading();
+      readerScreen.classList.remove('hidden');
+      currentPage = Math.min(comic.lastPage || 0, primaryPages.length - 1);
+      swapped = false;
+      renderPage();
+      showHud();
+    } catch (err) {
+      console.error(err);
+      hideLoading();
+      currentComicId = null;
+      alert('Error opening comic: ' + err.message);
+    }
+  }
+
+  async function deleteComic(id) {
+    if (!confirm('Remove this comic from your library?')) return;
+    await dbDelete(id);
+    await renderLibrary();
+  }
+
+  // ── Back to Library ──────────────────────────────────────────────────────
+
+  $('backBtn').addEventListener('click', () => {
+    readerScreen.classList.add('hidden');
+    // Revoke page object URLs to free memory
+    [...primaryPages, ...altPages].forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
+    primaryPages = []; altPages = [];
+    currentComicId = null;
+    swapped = false;
+    altOffset = 0;
+    hideLens();
+    clearTimeout(hudTimeout);
+  });
+
+  // ── CBR/RAR Support (node-unrar-js, loaded on demand) ───────────────────
+  // Uses the actual UnRAR engine compiled to WASM. The WASM binary is fetched
+  // separately and passed as `wasmBinary` so the library never tries to resolve
+  // it via a relative path (which breaks when loaded from a CDN).
+
+  let rarReady = false;
+  let rarInitPromise = null;
+  let _createExtractorFromData = null;
+  let _unrarWasm = null;
+
+  async function ensureRarLib() {
+    if (rarReady) return;
+    if (rarInitPromise) return rarInitPromise;
+
+    rarInitPromise = (async () => {
+      loadingText.textContent = 'Loading RAR support…';
+      let mod, wasmResp;
+      try {
+        [mod, wasmResp] = await Promise.all([
+          import('https://esm.sh/node-unrar-js@2.0.2'),
+          fetch('https://unpkg.com/node-unrar-js@2.0.2/esm/js/unrar.wasm'),
+        ]);
+      } catch (e) {
+        throw new Error('Failed to load RAR support. Check your internet connection.');
+      }
+      if (!wasmResp.ok) throw new Error('Failed to fetch RAR WASM binary.');
+      _unrarWasm = await wasmResp.arrayBuffer();
+      _createExtractorFromData = mod.createExtractorFromData;
+      if (!_createExtractorFromData) throw new Error('RAR library API not found.');
+      rarReady = true;
+    })();
+
+    return rarInitPromise;
+  }
+
+  async function extractPagesFromRAR(fileOrBlob) {
+    await ensureRarLib();
+    loadingText.textContent = 'Extracting pages…';
+
+    const data = await fileOrBlob.arrayBuffer();
+    const extractor = await _createExtractorFromData({ wasmBinary: _unrarWasm, data });
+    const { files } = extractor.extract();
+
+    const imageEntries = [];
+    for (const file of files) {
+      const name = file.fileHeader.name;
+      if (!file.fileHeader.flags.directory &&
+          /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(name) &&
+          file.extraction) {
+        imageEntries.push({ name, blob: new Blob([file.extraction]) });
+      }
+    }
+
+    imageEntries.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    return imageEntries.map(({ name, blob }) => ({
+      name, blob, url: URL.createObjectURL(blob)
+    }));
+  }
+
+  // ── Extract Pages (CBZ or CBR) ───────────────────────────────────────────
+
+  // fileOrBlob may be a File or a Blob retrieved from IndexedDB.
+  // filename is passed separately since Blobs from IDB have no .name.
+  async function extractPages(fileOrBlob, filename) {
+    const name = filename || (fileOrBlob.name) || '';
+    const ext = name.split('.').pop().toLowerCase();
+    if (ext === 'cbr' || ext === 'rar') {
+      return extractPagesFromRAR(fileOrBlob);
+    }
+
+    // CBZ / ZIP
+    const zip = await JSZip.loadAsync(fileOrBlob);
+    const imageFiles = [];
+    zip.forEach((path, entry) => {
+      if (!entry.dir && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(path)) {
+        imageFiles.push({ name: path, entry });
+      }
+    });
+    imageFiles.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    const pages = [];
+    for (const f of imageFiles) {
+      const blob = await f.entry.async('blob');
+      pages.push({ name: f.name, blob, url: URL.createObjectURL(blob) });
+    }
+    return pages;
+  }
+
+  // ── Page Alignment Detection ─────────────────────────────────────────────
+  // Downscale each page to a 32×32 grayscale thumbnail and compare MAD across
+  // candidate offsets. Matching pages (same art, different language text) will
+  // score much lower than mismatched pages.
+
+  function getPagePixels(url, size) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = size; canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, size, size);
+          const data = ctx.getImageData(0, 0, size, size).data;
+          const gray = new Float32Array(size * size);
+          for (let i = 0; i < size * size; i++) {
+            gray[i] = (data[i*4]*0.299 + data[i*4+1]*0.587 + data[i*4+2]*0.114) / 255;
+          }
+          resolve(gray);
+        } catch (e) { reject(e); }
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  async function detectAltOffset(primaryPages, altPages) {
+    const THUMB = 32;
+    const maxOffset = Math.min(6, Math.abs(primaryPages.length - altPages.length) + 3);
+
+    // Compare pages starting from index 2 (skip cover + first preamble page)
+    // and use up to 12 pages for the comparison window.
+    const compareStart = 2;
+    const compareEnd   = Math.min(compareStart + 12, primaryPages.length - 1);
+
+    // Precompute thumbnails for all pages we might need
+    const pThumbs = {}, aThumbs = {};
+    const pIdxs = new Set(), aIdxs = new Set();
+    for (let i = compareStart; i <= compareEnd; i++) pIdxs.add(i);
+    for (let offset = -maxOffset; offset <= maxOffset; offset++) {
+      for (let i = compareStart; i <= compareEnd; i++) {
+        const j = i + offset;
+        if (j >= 0 && j < altPages.length) aIdxs.add(j);
+      }
+    }
+
+    await Promise.all([
+      ...[...pIdxs].map(async i => { pThumbs[i] = await getPagePixels(primaryPages[i].url, THUMB); }),
+      ...[...aIdxs].map(async j => { aThumbs[j] = await getPagePixels(altPages[j].url, THUMB); }),
+    ]);
+
+    let bestOffset = 0;
+    let bestScore  = Infinity;
+    const pixels = THUMB * THUMB;
+
+    for (let offset = -maxOffset; offset <= maxOffset; offset++) {
+      let total = 0, count = 0;
+      for (let i = compareStart; i <= compareEnd; i++) {
+        const j = i + offset;
+        if (j < 0 || j >= altPages.length) continue;
+        if (!pThumbs[i] || !aThumbs[j]) continue;
+        let diff = 0;
+        for (let k = 0; k < pixels; k++) diff += Math.abs(pThumbs[i][k] - aThumbs[j][k]);
+        total += diff / pixels;
+        count++;
+      }
+      if (count < 3) continue;
+      const avg = total / count;
+      if (avg < bestScore) { bestScore = avg; bestOffset = offset; }
+    }
+
+    return bestOffset;
+  }
+
+  // Extract just the first page for use as a library cover thumbnail.
+  function inferComicName(filename) {
+    return filename
+      .replace(/\.[^.]+$/, '')          // strip extension
+      .replace(/[_]/g, ' ')             // underscores → spaces
+      .replace(/\s*-\s*/g, ' - ')       // normalise hyphen spacing
+      .replace(/\s{2,}/g, ' ')          // collapse multiple spaces
+      .trim();
+  }
+
+  async function extractCoverBlob(file) {
+    const ext = (file.name || '').split('.').pop().toLowerCase();
+
+    if (ext === 'cbr' || ext === 'rar') {
+      try {
+        await ensureRarLib();
+        const data = await file.arrayBuffer();
+        const extractor = await _createExtractorFromData({ wasmBinary: _unrarWasm, data });
+        const { files } = extractor.extract();
+        const imageEntries = [];
+        for (const f of files) {
+          const name = f.fileHeader.name;
+          if (!f.fileHeader.flags.directory &&
+              /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(name) &&
+              f.extraction) {
+            imageEntries.push({ name, blob: new Blob([f.extraction]) });
+          }
+        }
+        if (imageEntries.length === 0) return null;
+        imageEntries.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+        );
+        return imageEntries[0].blob;
+      } catch {
+        return null;
+      }
+    }
+
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const imageFiles = [];
+      zip.forEach((path, entry) => {
+        if (!entry.dir && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(path)) {
+          imageFiles.push({ name: path, entry });
+        }
+      });
+      if (imageFiles.length === 0) return null;
+      imageFiles.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      );
+      return imageFiles[0].entry.async('blob');
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Reader: Render Page ──────────────────────────────────────────────────
+
+  function altIdx() {
+    return Math.max(0, Math.min(altPages.length - 1, currentPage + altOffset));
+  }
+
+  function renderPage() {
+    const pUrl = primaryPages[currentPage]?.url || '';
+    const aUrl = altPages[altIdx()]?.url         || '';
+
+    primaryImg.src = swapped ? aUrl : pUrl;
+    altImgLens.src = swapped ? pUrl : aUrl;
+
+    $('curPage').textContent    = currentPage + 1;
+    $('totalPages').textContent = primaryPages.length;
+    $('prevBtn').disabled       = currentPage === 0;
+    $('nextBtn').disabled       = currentPage >= primaryPages.length - 1;
+
+    langPill.textContent = swapped ? 'Alternate' : 'Primary';
+    langPill.className   = 'lang-pill ' + (swapped ? 'alt' : 'primary');
+
+    // Offset indicator
+    const offsetLabel = $('offsetLabel');
+    if (offsetLabel) {
+      offsetLabel.textContent = altOffset === 0 ? '0' : (altOffset > 0 ? '+' + altOffset : String(altOffset));
+      offsetLabel.style.color = altOffset !== 0 ? 'var(--accent)' : 'rgba(255,255,255,0.45)';
+    }
+
+    hideLens();
+
+    if (currentComicId !== null) dbUpdateLastPage(currentComicId, currentPage);
+  }
+
+  // ── Reader: Navigation ───────────────────────────────────────────────────
+
+  function nextPage() {
+    if (currentPage < primaryPages.length - 1) { currentPage++; renderPage(); }
+  }
+  function prevPage() {
+    if (currentPage > 0) { currentPage--; renderPage(); }
+  }
+
+  $('prevBtn').addEventListener('click', prevPage);
+  $('nextBtn').addEventListener('click', nextPage);
+  $('tapLeft').addEventListener('click', prevPage);
+  $('tapRight').addEventListener('click', nextPage);
+
+  document.addEventListener('keydown', e => {
+    if (readerScreen.classList.contains('hidden')) return;
+    if (e.key === 'ArrowRight' || e.key === ' ') nextPage();
+    if (e.key === 'ArrowLeft') prevPage();
+    if (e.key === 'Escape') $('backBtn').click();
+  });
+
+  $('swapBtn').addEventListener('click', () => { swapped = !swapped; renderPage(); });
+
+  // ── Settings Panel ───────────────────────────────────────────────────────
+
+  function updateLensPreview(r) {
+    const px = Math.round(r * 2);
+    lensPreview.style.width  = px + 'px';
+    lensPreview.style.height = px + 'px';
+  }
+
+  function openSettings() {
+    lensSizeSlider.value    = lensRadius;
+    lensSizeValue.textContent = lensRadius;
+    updateLensPreview(lensRadius);
+    settingsPanel.classList.add('open');
+  }
+
+  function closeSettings() {
+    settingsPanel.classList.remove('open');
+  }
+
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('readerSettingsBtn').addEventListener('click', openSettings);
+  $('settingsCloseBtn').addEventListener('click', closeSettings);
+
+  lensSizeSlider.addEventListener('input', e => {
+    lensRadius = parseInt(e.target.value, 10);
+    lensSizeValue.textContent = lensRadius;
+    updateLensPreview(lensRadius);
+    localStorage.setItem('ll_lensRadius', lensRadius);
+  });
+
+  $('offsetDec').addEventListener('click', () => {
+    altOffset--;
+    renderPage();
+    if (currentComicId !== null) dbUpdateAltOffset(currentComicId, altOffset);
+  });
+  $('offsetInc').addEventListener('click', () => {
+    altOffset++;
+    renderPage();
+    if (currentComicId !== null) dbUpdateAltOffset(currentComicId, altOffset);
+  });
+
+  // ── Reader: Reveal Lens ──────────────────────────────────────────────────
+
+  function updateLens(clientX, clientY) {
+    const imgRect = primaryImg.getBoundingClientRect();
+    const containerRect = canvasContainer.getBoundingClientRect();
+
+    const relX = clientX - imgRect.left;
+    const relY = clientY - imgRect.top;
+    const offsetY = touching ? -40 : 0;
+    const lensX = relX;
+    const lensY = relY + offsetY;
+    const d = lensRadius * 2;
+
+    altImgLens.style.width  = imgRect.width + 'px';
+    altImgLens.style.height = imgRect.height + 'px';
+    altImgLens.style.left   = '0px';
+    altImgLens.style.top    = '0px';
+
+    lensLayer.style.clipPath = `circle(${lensRadius}px at ${lensX}px ${lensY}px)`;
+    lensLayer.classList.add('active');
+
+    const ringLeft = imgRect.left - containerRect.left + lensX - lensRadius;
+    const ringTop  = imgRect.top  - containerRect.top  + lensY - lensRadius;
+    lensRing.style.width  = d + 'px';
+    lensRing.style.height = d + 'px';
+    lensRing.style.left   = ringLeft + 'px';
+    lensRing.style.top    = ringTop  + 'px';
+    lensRing.classList.add('active');
+  }
+
+  function hideLens() {
+    lensLayer.classList.remove('active');
+    lensRing.classList.remove('active');
+  }
+
+  const readerEl = $('readerScreen');
+  let longPressTimer = null;
+  let isLensActive = false;
+  let startTouchPos = null;
+
+  function getEventPos(e) {
+    if (e.touches && e.touches.length > 0) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  readerEl.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    const pos = getEventPos(e);
+    startTouchPos = pos;
+    touching = true;
+    longPressTimer = setTimeout(() => {
+      isLensActive = true;
+      updateLens(pos.x, pos.y);
+    }, 200);
+  }, { passive: false });
+
+  readerEl.addEventListener('touchmove', e => {
+    if (isLensActive) {
+      e.preventDefault();
+      updateLens(getEventPos(e).x, getEventPos(e).y);
+    } else if (longPressTimer) {
+      const pos = getEventPos(e);
+      const dx = pos.x - startTouchPos.x;
+      const dy = pos.y - startTouchPos.y;
+      if (Math.sqrt(dx*dx + dy*dy) > 15) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }
+  }, { passive: false });
+
+  readerEl.addEventListener('touchend', e => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    if (isLensActive) { isLensActive = false; hideLens(); e.preventDefault(); }
+    touching = false;
+  }, { passive: false });
+
+  readerEl.addEventListener('touchcancel', () => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    isLensActive = false;
+    touching = false;
+    hideLens();
+  });
+
+  // Mouse (desktop)
+  readerEl.addEventListener('mousedown', e => {
+    if (e.target.closest('.reader-hud') || e.target.closest('.reader-header')) return;
+    touching = false;
+    isLensActive = true;
+    updateLens(e.clientX, e.clientY);
+  });
+  readerEl.addEventListener('mousemove', e => {
+    if (isLensActive) updateLens(e.clientX, e.clientY);
+  });
+  readerEl.addEventListener('mouseup', () => {
+    if (isLensActive) { isLensActive = false; hideLens(); }
+  });
+  readerEl.addEventListener('mouseleave', () => {
+    if (isLensActive) { isLensActive = false; hideLens(); }
+  });
+
+  window.addEventListener('resize', () => { if (isLensActive) hideLens(); });
+
+  // ── Reader: HUD Auto-hide ────────────────────────────────────────────────
+
+  function showHud() {
+    readerHud.classList.remove('hidden');
+    readerHeader.classList.remove('hidden');
+    langPill.style.opacity = '1';
+    clearTimeout(hudTimeout);
+    hudTimeout = setTimeout(() => {
+      if (!readerScreen.classList.contains('hidden')) {
+        readerHud.classList.add('hidden');
+        readerHeader.classList.add('hidden');
+        langPill.style.opacity = '0';
+      }
+    }, 4000);
+  }
+
+  readerEl.addEventListener('click', () => { if (!isLensActive) showHud(); });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+
+  renderLibrary();
+
+})();
+</script>
+</body>
+</html>
