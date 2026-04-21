@@ -1614,25 +1614,35 @@ html, body {
     const pb = currentPrimaryBox;
     const ab = currentAltBox;
 
-    // Fall back to default (same size, no offset) if boxes aren't ready yet
-    // or if both images already fill their full area (no registration needed).
     if (!pb || !ab) return { width: imgW, height: imgH, left: 0, top: 0 };
 
     const abW = ab.right - ab.left;
     const abH = ab.bottom - ab.top;
-    if (abW < 0.1 || abH < 0.1) return { width: imgW, height: imgH, left: 0, top: 0 };
+    if (abW < 0.05 || abH < 0.05) return { width: imgW, height: imgH, left: 0, top: 0 };
 
-    // Primary content rectangle in lensLayer (container) coords
-    const pCX = pb.left   * imgW;
-    const pCY = pb.top    * imgH;
+    // We need the alt image's natural dimensions for uniform scaling.
+    const aNatW = altImgLens.naturalWidth;
+    const aNatH = altImgLens.naturalHeight;
+    if (!aNatW || !aNatH) return { width: imgW, height: imgH, left: 0, top: 0 };
+
+    // Primary content area in display pixels
+    const pCX = pb.left * imgW;
+    const pCY = pb.top  * imgH;
     const pCW = (pb.right  - pb.left) * imgW;
     const pCH = (pb.bottom - pb.top)  * imgH;
 
-    // Alt image dimensions such that its content box fills [pCX,pCY,pCW,pCH]
-    const altW    = pCW / abW;
-    const altH    = pCH / abH;
-    const altLeft = pCX - ab.left * altW;
-    const altTop  = pCY - ab.top  * altH;
+    // Scale the alt image UNIFORMLY so its content height matches the primary's
+    // content height. This is the critical axis — vertical panel positions and
+    // speech balloon locations must align. Horizontal overflow is fine; the lens
+    // circle clips it anyway.
+    const altH   = pCH / abH;
+    const altW   = altH * (aNatW / aNatH);   // maintain natural aspect ratio
+
+    // Align tops: alt content top-edge lands at primary content top-edge
+    const altTop = pCY - ab.top * altH;
+
+    // Center alt content horizontally on primary content center
+    const altLeft = (pCX + pCW / 2) - (ab.left + abW / 2) * altW;
 
     return { width: altW, height: altH, left: altLeft, top: altTop };
   }
