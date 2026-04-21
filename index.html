@@ -427,17 +427,6 @@ html, body {
 .tap-zone-right { right: 0; }
 
 /* Language pill */
-.lang-pill {
-  position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 64px)); left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 14px; border-radius: 20px;
-  font-size: 12px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 1px;
-  z-index: 80; backdrop-filter: blur(8px);
-  transition: all 0.3s ease; pointer-events: none;
-}
-.lang-pill.primary { background: rgba(240,192,64,0.85); color: #0a0a0f; }
-.lang-pill.alt { background: rgba(96,96,224,0.85); color: #fff; }
 
 /* ── Loading Overlay ── */
 .loading-overlay {
@@ -606,7 +595,6 @@ html, body {
       <div class="lens-ring" id="lensRing"></div>
     </div>
 
-    <div class="lang-pill primary" id="langPill">Learning</div>
 
     <div class="tap-zone-left" id="tapLeft"></div>
     <div class="tap-zone-right" id="tapRight"></div>
@@ -830,7 +818,6 @@ html, body {
   const lensLayer      = $('lensLayer');
   const lensRing       = $('lensRing');
   const canvasContainer = $('canvasContainer');
-  const langPill       = $('langPill');
   const lensSizeSlider  = $('lensSizeSlider');
   const lensSizeValue   = $('lensSizeValue');
   const lensPreview     = $('lensPreview');
@@ -1435,8 +1422,6 @@ html, body {
     $('prevBtn').disabled       = currentPage === 0;
     $('nextBtn').disabled       = currentPage >= primaryPages.length - 1;
 
-    langPill.textContent = swapped ? 'Native' : 'Learning';
-    langPill.className   = 'lang-pill ' + (swapped ? 'alt' : 'primary');
 
     // Align button: highlight amber when confidence is low
     const alignBtn = $('alignBtn');
@@ -1763,13 +1748,11 @@ html, body {
   function showHud() {
     readerHud.classList.remove('hidden');
     readerHeader.classList.remove('hidden');
-    langPill.style.opacity = '1';
     clearTimeout(hudTimeout);
     hudTimeout = setTimeout(() => {
       if (!readerScreen.classList.contains('hidden')) {
         readerHud.classList.add('hidden');
         readerHeader.classList.add('hidden');
-        langPill.style.opacity = '0';
       }
     }, 4000);
   }
