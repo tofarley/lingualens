@@ -1116,14 +1116,8 @@ html, body {
 
   // fileOrBlob may be a File or a Blob retrieved from IndexedDB.
   // filename is passed separately since Blobs from IDB have no .name.
-  async function extractPages(fileOrBlob, filename) {
-    const name = filename || (fileOrBlob.name) || '';
-    const ext = name.split('.').pop().toLowerCase();
-    if (ext === 'cbr' || ext === 'rar') {
-      return extractPagesFromRAR(fileOrBlob);
-    }
 
-    // CBZ / ZIP
+  async function extractPagesFromZip(fileOrBlob) {
     const zip = await JSZip.loadAsync(fileOrBlob);
     const imageFiles = [];
     zip.forEach((path, entry) => {
@@ -1140,6 +1134,27 @@ html, body {
       pages.push({ name: f.name, blob, url: URL.createObjectURL(blob) });
     }
     return pages;
+  }
+
+  async function extractPages(fileOrBlob, filename) {
+    const name = filename || (fileOrBlob.name) || '';
+    const ext = name.split('.').pop().toLowerCase();
+
+    if (ext === 'cbr' || ext === 'rar') {
+      try {
+        return await extractPagesFromRAR(fileOrBlob);
+      } catch (e) {
+        // Many CBR files are actually ZIP archives with a .cbr extension.
+        // If the RAR library rejects it, fall back to ZIP extraction.
+        if (/not RAR|invalid|bad|corrupt/i.test(e.message)) {
+          loadingText.textContent = 'Trying ZIP fallback…';
+          return await extractPagesFromZip(fileOrBlob);
+        }
+        throw e;
+      }
+    }
+
+    return extractPagesFromZip(fileOrBlob);
   }
 
   // ── Page Alignment Detection ─────────────────────────────────────────────
@@ -1368,8 +1383,9 @@ html, body {
           a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
         );
         return imageEntries[0].blob;
-      } catch {
-        return null;
+      } catch (e) {
+        // File may be a ZIP renamed to .cbr — fall through to ZIP extraction
+        if (!/not RAR|invalid|bad|corrupt/i.test(e.message)) return null;
       }
     }
 
