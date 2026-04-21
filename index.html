@@ -797,6 +797,9 @@ html, body {
   let altConfidence = []; // altConfidence[i] = MAD score for pair (lower = better match)
   let _pThumbs = null;    // cached grayscale thumbnails for alignment panel
   let _aThumbs = null;
+  let currentPrimaryBox = null; // content bounding box for displayed primary page
+  let currentAltBox     = null; // content bounding box for displayed alt page
+  const _contentBoxCache = new Map(); // url → Promise<box>
   let lensRadius = parseInt(localStorage.getItem('ll_lensRadius') || '90', 10);
   let swapped = false;
   let hudVisible = true;
@@ -1042,6 +1045,8 @@ html, body {
     swapped = false;
     altMap = []; altConfidence = [];
     _pThumbs = null; _aThumbs = null;
+    currentPrimaryBox = null; currentAltBox = null;
+    _contentBoxCache.clear();
     hideLens();
     clearTimeout(hudTimeout);
   });
@@ -1168,6 +1173,57 @@ html, body {
       img.onerror = () => resolve(null); // gracefully handle load failures
       img.src = url;
     });
+  }
+
+  // ── Content-aware registration ───────────────────────────────────────────
+  // Detect where the actual comic content (panel borders, ink) sits within
+  // each page image by finding the bounding box of non-white pixels.
+  // This lets us register the alt image so panel borders line up with the
+  // primary when viewed through the lens, even if the two editions have
+  // different scan borders or slightly different crops.
+
+  function findContentBox(gray, w, h) {
+    const THRESHOLD = 0.88; // darker than this = content (not scan border)
+    let left = w, right = -1, top = h, bottom = -1;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (gray[y * w + x] < THRESHOLD) {
+          if (x < left)   left   = x;
+          if (x > right)  right  = x;
+          if (y < top)    top    = y;
+          if (y > bottom) bottom = y;
+        }
+      }
+    }
+
+    if (right < left || bottom < top) return { left: 0, top: 0, right: 1, bottom: 1 };
+
+    // Add 1px margin, convert to normalised 0-1 coords
+    const MARGIN = 1;
+    const nl = Math.max(0,     left   - MARGIN) / w;
+    const nt = Math.max(0,     top    - MARGIN) / h;
+    const nr = Math.min(w - 1, right  + MARGIN) / w;
+    const nb = Math.min(h - 1, bottom + MARGIN) / h;
+
+    // Ignore sub-2% borders on all sides — not worth registering for
+    if (nl < 0.02 && nt < 0.02 && nr > 0.98 && nb > 0.98) {
+      return { left: 0, top: 0, right: 1, bottom: 1 };
+    }
+    return { left: nl, top: nt, right: nr, bottom: nb };
+  }
+
+  // Returns a Promise<box> — cached by URL so each image is only computed once.
+  function getContentBox(url) {
+    if (!url) return Promise.resolve(null);
+    if (!_contentBoxCache.has(url)) {
+      _contentBoxCache.set(url,
+        getPagePixels(url, 128).then(gray =>
+          gray ? findContentBox(gray, 128, 128) : null
+        )
+      );
+    }
+    return _contentBoxCache.get(url);
   }
 
   function computeMAD(gA, gB) {
@@ -1378,6 +1434,13 @@ html, body {
 
     hideLens();
 
+    // Kick off content-box computation for the current page pair so registration
+    // is ready before the user long-presses to activate the lens (fire-and-forget).
+    currentPrimaryBox = null; currentAltBox = null;
+    const priSrc = primaryImg.src, altSrc = altImgLens.src;
+    getContentBox(priSrc).then(b => { if (primaryImg.src === priSrc) currentPrimaryBox = b; });
+    getContentBox(altSrc).then(b => { if (altImgLens.src === altSrc) currentAltBox = b; });
+
     if (currentComicId !== null) dbUpdateLastPage(currentComicId, currentPage);
   }
 
@@ -1543,6 +1606,36 @@ html, body {
 
   // ── Reader: Reveal Lens ──────────────────────────────────────────────────
 
+  // Compute the position and size for altImgLens so its content bounding box
+  // (the actual comic panels, after trimming white scan borders) overlays the
+  // primary image's content box in the same viewport coordinates.
+  function computeAltTransform(imgW, imgH) {
+    const pb = currentPrimaryBox;
+    const ab = currentAltBox;
+
+    // Fall back to default (same size, no offset) if boxes aren't ready yet
+    // or if both images already fill their full area (no registration needed).
+    if (!pb || !ab) return { width: imgW, height: imgH, left: 0, top: 0 };
+
+    const abW = ab.right - ab.left;
+    const abH = ab.bottom - ab.top;
+    if (abW < 0.1 || abH < 0.1) return { width: imgW, height: imgH, left: 0, top: 0 };
+
+    // Primary content rectangle in lensLayer (container) coords
+    const pCX = pb.left   * imgW;
+    const pCY = pb.top    * imgH;
+    const pCW = (pb.right  - pb.left) * imgW;
+    const pCH = (pb.bottom - pb.top)  * imgH;
+
+    // Alt image dimensions such that its content box fills [pCX,pCY,pCW,pCH]
+    const altW    = pCW / abW;
+    const altH    = pCH / abH;
+    const altLeft = pCX - ab.left * altW;
+    const altTop  = pCY - ab.top  * altH;
+
+    return { width: altW, height: altH, left: altLeft, top: altTop };
+  }
+
   function updateLens(clientX, clientY) {
     const imgRect = primaryImg.getBoundingClientRect();
     const containerRect = canvasContainer.getBoundingClientRect();
@@ -1554,10 +1647,11 @@ html, body {
     const lensY = relY + offsetY;
     const d = lensRadius * 2;
 
-    altImgLens.style.width  = imgRect.width + 'px';
-    altImgLens.style.height = imgRect.height + 'px';
-    altImgLens.style.left   = '0px';
-    altImgLens.style.top    = '0px';
+    const tf = computeAltTransform(imgRect.width, imgRect.height);
+    altImgLens.style.width  = tf.width  + 'px';
+    altImgLens.style.height = tf.height + 'px';
+    altImgLens.style.left   = tf.left   + 'px';
+    altImgLens.style.top    = tf.top    + 'px';
 
     lensLayer.style.clipPath = `circle(${lensRadius}px at ${lensX}px ${lensY}px)`;
     lensLayer.classList.add('active');
