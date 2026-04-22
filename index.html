@@ -530,6 +530,24 @@ html, body {
   background: rgba(240, 192, 64, 0.08);
   transition: width 0.1s ease, height 0.1s ease;
 }
+
+.storage-bar-wrap {
+  height: 8px; border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden; margin: 10px 0 6px;
+}
+.storage-bar {
+  height: 100%; border-radius: 4px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.storage-bar.warn  { background: #e09030; }
+.storage-bar.danger { background: var(--danger); }
+.storage-numbers {
+  display: flex; justify-content: space-between;
+  font-size: 12px; color: var(--text-secondary);
+}
+.storage-numbers span:last-child { color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -643,6 +661,22 @@ html, body {
           </div>
           <div style="display:flex;justify-content:center;padding:12px 0;">
             <div class="settings-lens-preview" id="lensPreview"></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="settings-section-label">Storage</div>
+        <div class="settings-row-label">Library size</div>
+        <div class="settings-row-sub" id="storageUnsupported" style="display:none;">
+          Storage estimates not available in this browser.
+        </div>
+        <div id="storageInfo">
+          <div class="storage-bar-wrap">
+            <div class="storage-bar" id="storageBar" style="width:0%"></div>
+          </div>
+          <div class="storage-numbers">
+            <span id="storageUsed">—</span>
+            <span id="storageQuota">of — available</span>
           </div>
         </div>
       </div>
@@ -969,10 +1003,12 @@ html, body {
     try {
       const coverBlob = await extractCoverBlob(primaryFile);
       showLoading('Saving to library…');
+      // Safari refuses to store File objects in IndexedDB; convert to plain Blob first.
+      const toBlob = f => f.slice(0, f.size, f.type);
       await dbAdd({
         name,
-        primaryBlob: primaryFile,
-        altBlob: altFile,
+        primaryBlob: toBlob(primaryFile),
+        altBlob: toBlob(altFile),
         primaryFileName: primaryFile.name,
         altFileName: altFile.name,
         coverBlob,
@@ -1494,11 +1530,40 @@ html, body {
     lensPreview.style.height = px + 'px';
   }
 
-  function openSettings() {
+  function formatBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
+  async function openSettings() {
     lensSizeSlider.value    = lensRadius;
     lensSizeValue.textContent = lensRadius;
     updateLensPreview(lensRadius);
     settingsPanel.classList.add('open');
+
+    // Storage estimate
+    if (navigator.storage && navigator.storage.estimate) {
+      try {
+        const { usage, quota } = await navigator.storage.estimate();
+        const pct = quota > 0 ? Math.min(100, (usage / quota) * 100) : 0;
+        const bar = $('storageBar');
+        bar.style.width = pct.toFixed(1) + '%';
+        bar.classList.toggle('warn',   pct > 60 && pct <= 85);
+        bar.classList.toggle('danger', pct > 85);
+        $('storageUsed').textContent  = formatBytes(usage);
+        $('storageQuota').textContent = 'of ' + formatBytes(quota) + ' available';
+        $('storageInfo').style.display        = '';
+        $('storageUnsupported').style.display = 'none';
+      } catch {
+        $('storageInfo').style.display        = 'none';
+        $('storageUnsupported').style.display = '';
+      }
+    } else {
+      $('storageInfo').style.display        = 'none';
+      $('storageUnsupported').style.display = '';
+    }
   }
 
   function closeSettings() {
