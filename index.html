@@ -540,6 +540,7 @@ html, body {
     <div class="header">
       <div class="logo">LINGUA<span>LENS</span></div>
       <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-icon" id="sortBtn" title="Sort library" style="font-size:14px;font-weight:700;min-width:38px;font-family:'DM Sans',sans-serif;">A-Z</button>
         <button class="btn-icon" id="settingsBtn" title="Settings" style="font-size:18px;">⚙</button>
         <button class="btn btn-primary" id="addComicBtn">+ Add</button>
       </div>
@@ -788,7 +789,8 @@ html, body {
   let currentPrimaryBox = null; // content bounding box for displayed primary page
   let currentAltBox     = null; // content bounding box for displayed alt page
   const _contentBoxCache = new Map(); // url → Promise<box>
-  let lensRadius = parseInt(localStorage.getItem('ll_lensRadius') || '90', 10);
+  let lensRadius  = parseInt(localStorage.getItem('ll_lensRadius') || '90', 10);
+  let librarySort = localStorage.getItem('ll_librarySort') || 'date'; // 'date' | 'title'
   let swapped = false;
   let hudVisible = true;
   let hudTimeout = null;
@@ -849,7 +851,11 @@ html, body {
     coverUrls = [];
 
     const comics = await dbGetAll();
-    comics.sort((a, b) => b.dateAdded - a.dateAdded);
+    if (librarySort === 'title') {
+      comics.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      comics.sort((a, b) => b.dateAdded - a.dateAdded);
+    }
 
     if (comics.length === 0) {
       comicsGrid.classList.add('hidden');
@@ -913,6 +919,18 @@ html, body {
     if (primaryFile && altFile) btn.classList.add('ready');
     else btn.classList.remove('ready');
   }
+
+  function updateSortBtn() {
+    $('sortBtn').textContent = librarySort === 'title' ? 'A-Z' : '📅';
+    $('sortBtn').title = librarySort === 'title' ? 'Sorted by title — click for date' : 'Sorted by date — click for A-Z';
+  }
+
+  $('sortBtn').addEventListener('click', () => {
+    librarySort = librarySort === 'date' ? 'title' : 'date';
+    localStorage.setItem('ll_librarySort', librarySort);
+    updateSortBtn();
+    renderLibrary();
+  });
 
   $('addComicBtn').addEventListener('click', showAddComic);
   $('emptyAddBtn').addEventListener('click', showAddComic);
@@ -1761,6 +1779,7 @@ html, body {
 
   // ── Boot ─────────────────────────────────────────────────────────────────
 
+  updateSortBtn();
   renderLibrary();
 
 })();
