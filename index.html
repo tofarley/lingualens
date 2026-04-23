@@ -46,8 +46,9 @@ html, body {
 
 /* ── Shared Header ── */
 .header {
-  height: 56px; min-height: 56px;
-  padding: 0 16px;
+  height: calc(56px + env(safe-area-inset-top));
+  min-height: calc(56px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 16px 0;
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-surface);
   border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -342,7 +343,9 @@ html, body {
 #alignPanel.open { transform: translateY(0); }
 
 .align-header {
-  height: 56px; min-height: 56px; padding: 0 16px;
+  height: calc(56px + env(safe-area-inset-top));
+  min-height: calc(56px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 16px 0;
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-surface);
   border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -465,8 +468,9 @@ html, body {
 #settingsPanel.open { transform: translateY(0); }
 
 .settings-header {
-  height: 56px; min-height: 56px;
-  padding: 0 16px;
+  height: calc(56px + env(safe-area-inset-top));
+  min-height: calc(56px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 16px 0;
   display: flex; align-items: center; justify-content: space-between;
   background: var(--bg-surface);
   border-bottom: 1px solid rgba(255,255,255,0.06);
