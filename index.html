@@ -831,6 +831,13 @@ html, body {
   let touching = false;
   let currentComicId = null;
 
+  // Zoom / pan state (reader)
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 5;
+  let zoomScale = 1;
+  let panX = 0;
+  let panY = 0;
+
   // Add-comic form state
   let primaryFile = null;
   let altFile = null;
@@ -1079,6 +1086,7 @@ html, body {
 
   $('backBtn').addEventListener('click', () => {
     readerScreen.classList.add('hidden');
+    resetZoom();
     // Revoke page object URLs to free memory
     [...primaryPages, ...altPages].forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
     primaryPages = []; altPages = [];
@@ -1502,16 +1510,16 @@ html, body {
   // ── Reader: Navigation ───────────────────────────────────────────────────
 
   function nextPage() {
-    if (currentPage < primaryPages.length - 1) { currentPage++; renderPage(); }
+    if (currentPage < primaryPages.length - 1) { currentPage++; resetZoom(); renderPage(); }
   }
   function prevPage() {
-    if (currentPage > 0) { currentPage--; renderPage(); }
+    if (currentPage > 0) { currentPage--; resetZoom(); renderPage(); }
   }
 
   $('prevBtn').addEventListener('click', prevPage);
   $('nextBtn').addEventListener('click', nextPage);
-  $('tapLeft').addEventListener('click', prevPage);
-  $('tapRight').addEventListener('click', nextPage);
+  $('tapLeft').addEventListener('click', () => { if (zoomScale <= 1) prevPage(); });
+  $('tapRight').addEventListener('click', () => { if (zoomScale <= 1) nextPage(); });
 
   document.addEventListener('keydown', e => {
     if (readerScreen.classList.contains('hidden')) return;
@@ -1688,6 +1696,36 @@ html, body {
     renderPage();
   });
 
+  // ── Zoom helpers ─────────────────────────────────────────────────────────
+
+  function applyZoom() {
+    canvasContainer.style.transform = (zoomScale === 1 && panX === 0 && panY === 0)
+      ? '' : `translate(${panX}px,${panY}px) scale(${zoomScale})`;
+  }
+
+  function resetZoom(animate) {
+    if (animate) {
+      canvasContainer.style.transition = 'transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94)';
+      setTimeout(() => { canvasContainer.style.transition = ''; }, 310);
+    }
+    zoomScale = 1; panX = 0; panY = 0;
+    applyZoom();
+  }
+
+  function clampPanAndApply() {
+    applyZoom();
+    if (zoomScale <= 1) return;
+    const margin = 80;
+    const vW = window.innerWidth, vH = window.innerHeight;
+    const r = canvasContainer.getBoundingClientRect();
+    let changed = false;
+    if (r.right  < margin)      { panX += margin - r.right;        changed = true; }
+    if (r.left   > vW - margin) { panX -= r.left - (vW - margin);  changed = true; }
+    if (r.bottom < margin)      { panY += margin - r.bottom;       changed = true; }
+    if (r.top    > vH - margin) { panY -= r.top  - (vH - margin);  changed = true; }
+    if (changed) applyZoom();
+  }
+
   // ── Reader: Reveal Lens ──────────────────────────────────────────────────
 
   // Compute the position and size for altImgLens so its content bounding box
@@ -1721,17 +1759,19 @@ html, body {
   }
 
   function updateLens(clientX, clientY) {
-    const imgRect = primaryImg.getBoundingClientRect();
+    const imgRect       = primaryImg.getBoundingClientRect();
     const containerRect = canvasContainer.getBoundingClientRect();
 
-    const relX = clientX - imgRect.left;
-    const relY = clientY - imgRect.top;
-    const offsetY = touching ? -40 : 0;
+    // Convert viewport coords to element-local coords (before CSS scale transform)
+    const relX  = (clientX - imgRect.left) / zoomScale;
+    const relY  = (clientY - imgRect.top)  / zoomScale;
     const lensX = relX;
-    const lensY = relY + offsetY;
+    const lensY = relY + (touching ? -40 : 0);
     const d = lensRadius * 2;
 
-    const tf = computeAltTransform(imgRect.width, imgRect.height);
+    const localW = imgRect.width  / zoomScale;
+    const localH = imgRect.height / zoomScale;
+    const tf = computeAltTransform(localW, localH);
     altImgLens.style.width  = tf.width  + 'px';
     altImgLens.style.height = tf.height + 'px';
     altImgLens.style.left   = tf.left   + 'px';
@@ -1740,8 +1780,9 @@ html, body {
     lensLayer.style.clipPath = `circle(${lensRadius}px at ${lensX}px ${lensY}px)`;
     lensLayer.classList.add('active');
 
-    const ringLeft = imgRect.left - containerRect.left + lensX - lensRadius;
-    const ringTop  = imgRect.top  - containerRect.top  + lensY - lensRadius;
+    // Ring is absolutely positioned in canvasContainer local space
+    const ringLeft = (imgRect.left - containerRect.left) / zoomScale + lensX - lensRadius;
+    const ringTop  = (imgRect.top  - containerRect.top)  / zoomScale + lensY - lensRadius;
     lensRing.style.width  = d + 'px';
     lensRing.style.height = d + 'px';
     lensRing.style.left   = ringLeft + 'px';
@@ -1758,19 +1799,45 @@ html, body {
   let longPressTimer = null;
   let isLensActive = false;
   let startTouchPos = null;
+  let lastTouchPos  = null;
+  let isPinching    = false;
+  let isDragging1F  = false;
+  let lastPinchDist = 0;
+  let lastPinchMid  = { x: 0, y: 0 };
 
   function getEventPos(e) {
-    if (e.touches && e.touches.length > 0) {
-      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    }
-    return { x: e.clientX, y: e.clientY };
+    return e.touches && e.touches.length > 0
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      : { x: e.clientX, y: e.clientY };
+  }
+
+  function getTouchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+
+  function getTouchMid(touches) {
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
   }
 
   readerEl.addEventListener('touchstart', e => {
-    if (e.touches.length !== 1) return;
+    if (e.touches.length >= 2) {
+      e.preventDefault();
+      clearTimeout(longPressTimer); longPressTimer = null;
+      if (isLensActive) { isLensActive = false; hideLens(); }
+      isPinching = true; isDragging1F = false;
+      lastPinchDist = getTouchDist(e.touches);
+      lastPinchMid  = getTouchMid(e.touches);
+      return;
+    }
+    if (e.touches.length !== 1 || isPinching) return;
     const pos = getEventPos(e);
-    startTouchPos = pos;
-    touching = true;
+    startTouchPos = pos; lastTouchPos = pos;
+    touching = true; isDragging1F = false;
     longPressTimer = setTimeout(() => {
       isLensActive = true;
       updateLens(pos.x, pos.y);
@@ -1778,40 +1845,80 @@ html, body {
   }, { passive: false });
 
   readerEl.addEventListener('touchmove', e => {
+    if (isPinching) {
+      e.preventDefault();
+      if (e.touches.length >= 2) {
+        const dist = getTouchDist(e.touches);
+        const mid  = getTouchMid(e.touches);
+        const cX = window.innerWidth  / 2;
+        const cY = window.innerHeight / 2;
+        const oldScale = zoomScale;
+        zoomScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomScale * (dist / lastPinchDist)));
+        panX = mid.x - cX - (lastPinchMid.x - cX - panX) / oldScale * zoomScale;
+        panY = mid.y - cY - (lastPinchMid.y - cY - panY) / oldScale * zoomScale;
+        lastPinchDist = dist; lastPinchMid = mid;
+        clampPanAndApply();
+      } else if (e.touches.length === 1 && isDragging1F) {
+        const pos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        panX += pos.x - lastTouchPos.x;
+        panY += pos.y - lastTouchPos.y;
+        lastTouchPos = pos;
+        clampPanAndApply();
+      }
+      return;
+    }
     if (isLensActive) {
       e.preventDefault();
       updateLens(getEventPos(e).x, getEventPos(e).y);
     } else if (longPressTimer) {
       const pos = getEventPos(e);
-      const dx = pos.x - startTouchPos.x;
-      const dy = pos.y - startTouchPos.y;
-      if (Math.sqrt(dx*dx + dy*dy) > 15) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
+      const dx = pos.x - startTouchPos.x, dy = pos.y - startTouchPos.y;
+      if (dx*dx + dy*dy > 225) {
+        clearTimeout(longPressTimer); longPressTimer = null;
+        if (zoomScale > 1) { isDragging1F = true; lastTouchPos = pos; }
       }
+    } else if (isDragging1F && zoomScale > 1) {
+      e.preventDefault();
+      const pos = getEventPos(e);
+      panX += pos.x - lastTouchPos.x;
+      panY += pos.y - lastTouchPos.y;
+      lastTouchPos = pos;
+      clampPanAndApply();
     }
   }, { passive: false });
 
   readerEl.addEventListener('touchend', e => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-    if (isLensActive) { isLensActive = false; hideLens(); e.preventDefault(); }
+    if (isPinching) {
+      e.preventDefault();
+      if (e.touches.length >= 2) return;
+      if (e.touches.length === 1) {
+        isDragging1F = zoomScale > 1;
+        lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        return;
+      }
+      isPinching = false; isDragging1F = false;
+      if (zoomScale < 1.05) resetZoom(true);
+      return;
+    }
+    clearTimeout(longPressTimer); longPressTimer = null;
     touching = false;
+    if (isLensActive) {
+      isLensActive = false; hideLens(); isDragging1F = false; e.preventDefault(); return;
+    }
+    if (isDragging1F) { isDragging1F = false; e.preventDefault(); return; }
+    isDragging1F = false;
   }, { passive: false });
 
   readerEl.addEventListener('touchcancel', () => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-    isLensActive = false;
-    touching = false;
-    hideLens();
+    clearTimeout(longPressTimer); longPressTimer = null;
+    isLensActive = false; isPinching = false; isDragging1F = false;
+    touching = false; hideLens();
   });
 
   // Mouse (desktop)
   readerEl.addEventListener('mousedown', e => {
     if (e.target.closest('.reader-hud') || e.target.closest('.reader-header')) return;
-    touching = false;
-    isLensActive = true;
+    touching = false; isLensActive = true;
     updateLens(e.clientX, e.clientY);
   });
   readerEl.addEventListener('mousemove', e => {
@@ -1823,6 +1930,20 @@ html, body {
   readerEl.addEventListener('mouseleave', () => {
     if (isLensActive) { isLensActive = false; hideLens(); }
   });
+
+  // Mouse wheel zoom (desktop)
+  readerEl.addEventListener('wheel', e => {
+    if (readerScreen.classList.contains('hidden')) return;
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const cX = window.innerWidth  / 2;
+    const cY = window.innerHeight / 2;
+    const oldScale = zoomScale;
+    zoomScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomScale * delta));
+    panX = e.clientX - cX - (e.clientX - cX - panX) / oldScale * zoomScale;
+    panY = e.clientY - cY - (e.clientY - cY - panY) / oldScale * zoomScale;
+    clampPanAndApply();
+  }, { passive: false });
 
   window.addEventListener('resize', () => { if (isLensActive) hideLens(); });
 
