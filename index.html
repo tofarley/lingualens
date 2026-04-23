@@ -236,6 +236,9 @@ html, body {
 .page-canvas-container {
   position: relative;
   display: flex; align-items: center; justify-content: center;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .page-img {
   display: block;
@@ -548,6 +551,42 @@ html, body {
   font-size: 12px; color: var(--text-secondary);
 }
 .storage-numbers span:last-child { color: var(--text-muted); }
+
+/* ── Add-to-Home-Screen prompt ── */
+#ahsModal {
+  position: fixed; inset: 0; z-index: 900;
+  display: none; flex-direction: column; justify-content: flex-end;
+}
+#ahsModal.open { display: flex; }
+.ahs-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+}
+.ahs-sheet {
+  position: relative;
+  background: var(--bg-surface);
+  border-radius: 20px 20px 0 0;
+  padding: 28px 24px;
+  padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px));
+  display: flex; flex-direction: column; gap: 14px;
+}
+.ahs-sheet h2 {
+  font-family: 'Anybody', sans-serif; font-weight: 900; font-size: 20px;
+  color: var(--text-primary);
+}
+.ahs-sheet p { color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+.ahs-sheet p strong { color: var(--text-primary); }
+.ahs-sheet .ahs-steps {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg-card); border-radius: 10px; padding: 14px 16px;
+}
+.ahs-sheet .ahs-step { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.ahs-sheet .ahs-step-num {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent); color: #0a0a0f;
+  font-weight: 700; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
 </style>
 </head>
 <body>
@@ -559,6 +598,7 @@ html, body {
       <div class="logo">LINGUA<span>LENS</span></div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="btn-icon" id="sortBtn" title="Sort library" style="font-size:14px;font-weight:700;min-width:38px;font-family:'DM Sans',sans-serif;">A-Z</button>
+        <button class="btn-icon" id="fullscreenBtnLib" title="Full screen" style="font-size:16px;">⛶</button>
         <button class="btn-icon" id="settingsBtn" title="Settings" style="font-size:18px;">⚙</button>
         <button class="btn btn-primary" id="addComicBtn">+ Add</button>
       </div>
@@ -621,7 +661,10 @@ html, body {
     <div class="reader-header" id="readerHeader">
       <button class="btn-icon" id="backBtn" title="Back to library">←</button>
       <div class="logo" style="font-size:15px">LINGUA<span>LENS</span></div>
-      <button class="btn-icon" id="readerSettingsBtn" title="Settings" style="font-size:18px;">⚙</button>
+      <div style="display:flex;gap:6px;">
+        <button class="btn-icon" id="fullscreenBtnReader" title="Full screen" style="font-size:16px;">⛶</button>
+        <button class="btn-icon" id="readerSettingsBtn" title="Settings" style="font-size:18px;">⚙</button>
+      </div>
     </div>
 
     <div class="reader-hud" id="readerHud">
@@ -706,6 +749,21 @@ html, body {
           This learning page has no counterpart in the native version
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── ADD TO HOME SCREEN PROMPT ── -->
+  <div id="ahsModal">
+    <div class="ahs-overlay" id="ahsOverlay"></div>
+    <div class="ahs-sheet">
+      <h2>Go Full Screen</h2>
+      <p>LinguaLens runs best as a full-screen app — no Safari toolbar in the way.</p>
+      <div class="ahs-steps">
+        <div class="ahs-step"><div class="ahs-step-num">1</div><span>Tap the <strong>Share</strong> button in Safari (↑)</span></div>
+        <div class="ahs-step"><div class="ahs-step-num">2</div><span>Choose <strong>Add to Home Screen</strong></span></div>
+        <div class="ahs-step"><div class="ahs-step-num">3</div><span>Open LinguaLens from your home screen</span></div>
+      </div>
+      <button class="btn btn-primary" id="ahsDismissBtn" style="width:100%;padding:14px;font-size:15px;border-radius:12px;font-family:'Anybody',sans-serif;font-weight:700;">Got it</button>
     </div>
   </div>
 
@@ -1835,10 +1893,12 @@ html, body {
       return;
     }
     if (e.touches.length !== 1 || isPinching) return;
+    e.preventDefault(); // Prevent iOS text-selection / callout on long-press
     const pos = getEventPos(e);
     startTouchPos = pos; lastTouchPos = pos;
     touching = true; isDragging1F = false;
     longPressTimer = setTimeout(() => {
+      longPressTimer = null; // self-clear so touchend can detect quick taps
       isLensActive = true;
       updateLens(pos.x, pos.y);
     }, 200);
@@ -1900,6 +1960,7 @@ html, body {
       if (zoomScale < 1.05) resetZoom(true);
       return;
     }
+    const wasTap = longPressTimer !== null; // timer still pending = finger lifted before long-press fired
     clearTimeout(longPressTimer); longPressTimer = null;
     touching = false;
     if (isLensActive) {
@@ -1907,6 +1968,14 @@ html, body {
     }
     if (isDragging1F) { isDragging1F = false; e.preventDefault(); return; }
     isDragging1F = false;
+    if (wasTap) {
+      showHud();
+      if (zoomScale <= 1 && startTouchPos) {
+        const vW = window.innerWidth;
+        if (startTouchPos.x < vW * 0.25) { prevPage(); return; }
+        if (startTouchPos.x > vW * 0.75) { nextPage(); return; }
+      }
+    }
   }, { passive: false });
 
   readerEl.addEventListener('touchcancel', () => {
@@ -1962,6 +2031,56 @@ html, body {
   }
 
   readerEl.addEventListener('click', () => { if (!isLensActive) showHud(); });
+
+  // ── Fullscreen & Add-to-Home-Screen ──────────────────────────────────────
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  function showAhsModal() { $('ahsModal').classList.add('open'); }
+  function hideAhsModal() {
+    $('ahsModal').classList.remove('open');
+    localStorage.setItem('ll_ahs_dismissed', '1');
+  }
+
+  async function toggleFullscreen() {
+    if (document.fullscreenEnabled) {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        }
+        return;
+      } catch { /* fall through to AHS prompt */ }
+    }
+    if (!isStandalone) showAhsModal();
+  }
+
+  $('ahsOverlay').addEventListener('click', hideAhsModal);
+  $('ahsDismissBtn').addEventListener('click', hideAhsModal);
+  $('fullscreenBtnLib').addEventListener('click', toggleFullscreen);
+  $('fullscreenBtnReader').addEventListener('click', toggleFullscreen);
+
+  // Track fullscreen state to update button icon
+  document.addEventListener('fullscreenchange', () => {
+    const icon = document.fullscreenElement ? '⊠' : '⛶';
+    $('fullscreenBtnLib').textContent = icon;
+    $('fullscreenBtnReader').textContent = icon;
+  });
+
+  // Hide fullscreen button when already in standalone PWA mode with no fullscreen API
+  if (isStandalone && !document.fullscreenEnabled) {
+    $('fullscreenBtnLib').style.display = 'none';
+    $('fullscreenBtnReader').style.display = 'none';
+  }
+
+  // One-time AHS prompt for iOS users opening in browser
+  if (isIOS && !isStandalone && !localStorage.getItem('ll_ahs_dismissed')) {
+    setTimeout(showAhsModal, 1500);
+  }
 
   // ── Boot ─────────────────────────────────────────────────────────────────
 
